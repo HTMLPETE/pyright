@@ -16,11 +16,12 @@ import {
     ExpressionNode,
     NameNode,
     NumberNode,
+    ParseNode,
     ParseNodeType,
     StringListNode,
     TupleNode,
 } from '../parser/parseNodes';
-import { KeywordType, OperatorType } from '../parser/tokenizerTypes';
+import { KeywordType, OperatorType, StringTokenFlags } from '../parser/tokenizerTypes';
 
 // Returns undefined if the expression cannot be evaluated
 // statically as a bool value or true/false if it can.
@@ -172,6 +173,7 @@ function _evaluateStaticBoolOrBoolLikeExpression(
         if (
             node.d.leftExpr.nodeType === ParseNodeType.Number &&
             node.d.leftExpr.d.isInteger &&
+            !node.d.leftExpr.d.isImaginary &&
             typeof node.d.leftExpr.d.value === 'number' &&
             node.d.rightExpr.nodeType === ParseNodeType.Index &&
             _isSysVersionInfoExpression(node.d.rightExpr.d.leftExpr, sysImportAliases) &&
@@ -193,7 +195,7 @@ function _evaluateStaticBoolOrBoolLikeExpression(
 
         if (
             _isSysPlatformInfoExpression(node.d.leftExpr, sysImportAliases) &&
-            node.d.rightExpr.nodeType === ParseNodeType.StringList
+            _isPlainStringList(node.d.rightExpr)
         ) {
             // Handle the special case of "sys.platform != 'X'"
             const comparisonPlatform = node.d.rightExpr.d.strings.map((s) => s.d.value).join('');
@@ -202,7 +204,7 @@ function _evaluateStaticBoolOrBoolLikeExpression(
         }
 
         if (
-            node.d.leftExpr.nodeType === ParseNodeType.StringList &&
+            _isPlainStringList(node.d.leftExpr) &&
             _isSysPlatformInfoExpression(node.d.rightExpr, sysImportAliases)
         ) {
             // Handle the special case of "'X' != sys.platform"
@@ -211,14 +213,14 @@ function _evaluateStaticBoolOrBoolLikeExpression(
             return _evaluateStringBinaryOperation(node.d.operator, comparisonPlatform, expectedPlatformName);
         }
 
-        if (_isOsNameInfoExpression(node.d.leftExpr) && node.d.rightExpr.nodeType === ParseNodeType.StringList) {
+        if (_isOsNameInfoExpression(node.d.leftExpr) && _isPlainStringList(node.d.rightExpr)) {
             // Handle the special case of "os.name == 'X'"
             const comparisonOsName = node.d.rightExpr.d.strings.map((s) => s.d.value).join('');
             const expectedOsName = _getExpectedOsNameFromPlatform(execEnv);
             if (expectedOsName !== undefined) {
                 return _evaluateStringBinaryOperation(node.d.operator, expectedOsName, comparisonOsName);
             }
-        } else if (node.d.leftExpr.nodeType === ParseNodeType.StringList && _isOsNameInfoExpression(node.d.rightExpr)) {
+        } else if (_isPlainStringList(node.d.leftExpr) && _isOsNameInfoExpression(node.d.rightExpr)) {
             // Handle the special case of "'X' == os.name"
             const comparisonOsName = node.d.leftExpr.d.strings.map((s) => s.d.value).join('');
             const expectedOsName = _getExpectedOsNameFromPlatform(execEnv);
@@ -455,6 +457,17 @@ function _evaluateVersionBinaryOperation(
     }
 
     return undefined;
+}
+
+function _isPlainStringList(node: ParseNode): boolean {
+    if (node.nodeType !== ParseNodeType.StringList) {
+        return false;
+    }
+    return node.d.strings.every(
+        (s) =>
+            s.nodeType === ParseNodeType.String &&
+            (s.d.token.flags & (StringTokenFlags.Bytes | StringTokenFlags.Format)) === 0
+    );
 }
 
 function _evaluateStringBinaryOperation(
